@@ -1,0 +1,217 @@
+.query-execution-page .scratchpad-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+  margin-bottom: 0;
+}
+
+.query-execution-page .scratchpad-toggle .toggle-icon {
+  font-size: 18px;
+  transition: transform 0.2s;
+}
+
+.query-execution-page .scratchpad-toggle.open .toggle-icon {
+  transform: rotate(90deg);
+}
+
+.query-execution-page .scratchpad-body {
+  display: none;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid #e8edf3;
+}
+
+.query-execution-page .scratchpad-body.open {
+  display: block;
+}
+
+.query-execution-page .search-wrapper {
+  position: relative;
+}
+
+.query-execution-page .search-wrapper input {
+  width: 100%;
+  padding: 10px 14px 10px 36px;
+  border: 1px solid #d1d9e0;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #333;
+  background-color: #fafbfc;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.query-execution-page .search-wrapper input:focus {
+  border-color: #1e3a5f;
+  background-color: #fff;
+}
+
+.query-execution-page .search-wrapper .search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #999;
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.query-execution-page .search-results {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 1px solid #d1d9e0;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  z-index: 50;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.query-execution-page .search-results.open {
+  display: block;
+}
+
+.query-execution-page .search-result-item {
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  border-bottom: 1px solid #f0f2f5;
+  transition: background 0.15s;
+}
+
+.query-execution-page .search-result-item:last-child {
+  border-bottom: none;
+}
+
+.query-execution-page .search-result-item:hover,
+.query-execution-page .search-result-item.highlighted {
+  background-color: #f0f4f8;
+}
+
+.query-execution-page .search-result-item .query-name {
+  font-weight: 600;
+  color: #1e3a5f;
+}
+
+.query-execution-page .search-result-item .query-desc {
+  font-size: 12px;
+  color: #888;
+  margin-top: 2px;
+}
+
+.query-execution-page .search-result-item .highlight {
+  background-color: #fff3cd;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.query-execution-page .search-no-results {
+  padding: 14px;
+  font-size: 13px;
+  color: #888;
+  text-align: center;
+}
+
+.query-execution-page .steps {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 28px;
+}
+
+.query-execution-page .step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.query-execution-page .step-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #e8edf3;
+  color: #999;
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.2s, color 0.2s;
+}
+
+.query-execution-page .step.active .step-circle {
+  background: #1e3a5f;
+  color: #fff;
+}
+
+.query-execution-page .step.done .step-circle {
+  background: #28a745;
+  color: #fff;
+}
+
+.query-execution-page .step-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #999;
+  transition: color 0.2s;
+}
+
+.query-execution-page .step.active .step-label,
+.query-execution-page .step.done .step-label {
+  color: #1e3a5f;
+}
+
+.query-execution-page .step-line {
+  flex: 1;
+  height: 2px;
+  background: #e8edf3;
+  margin: 0 8px;
+  transition: background 0.2s;
+}
+
+.query-execution-page .step-line.done {
+  background: #28a745;
+}
+
+.query-execution-page .selected-query-badge {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  background: #f0f4f8;
+  border: 1px solid #d1d9e0;
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.query-execution-page .selected-query-badge.show {
+  display: flex;
+}
+
+.query-execution-page .selected-query-badge .badge-name {
+  font-weight: 700;
+  color: #1e3a5f;
+}
+
+.query-execution-page .selected-query-badge .badge-clear {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.query-execution-page .selected-query-badge .badge-clear:hover {
+  color: #dc3545;
+}

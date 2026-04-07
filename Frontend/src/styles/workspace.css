@@ -259,6 +259,29 @@
   margin-top: 6px;
 }
 
+.workspace-test-run-area {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 2px dashed #d1d9e0;
+}
+
+.workspace-test-run-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1e3a5f;
+  margin-bottom: 12px;
+}
+
+.workspace-test-run-summary {
+  font-size: 13px;
+  color: #555;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  background: #d4edda;
+  border: 1px solid #c3e6cb;
+  border-radius: 6px;
+}
+
 .workspace-table-code {
   display: block;
   max-width: 360px;

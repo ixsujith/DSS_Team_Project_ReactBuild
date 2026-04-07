@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   deleteQuery,
+  executeTempQuery,
   getAllDbConfigs,
   getAllDbTypes,
   getAllQueries,
@@ -27,6 +28,12 @@ function ReportConfigPanel({ onQueriesChanged }) {
 
   const [tableLoading, setTableLoading] = useState(true);
   const [savingQuery, setSavingQuery] = useState(false);
+
+  const [testRunVisible, setTestRunVisible] = useState(false);
+  const [testRunAlert, setTestRunAlert] = useState(null);
+  const [testRunLoading, setTestRunLoading] = useState(false);
+  const [testRunResult, setTestRunResult] = useState(null);
+  const [testRunPage, setTestRunPage] = useState(0);
 
   const loadReportData = useCallback(async () => {
     setTableLoading(true);
@@ -79,10 +86,75 @@ function ReportConfigPanel({ onQueriesChanged }) {
     );
   }, [configs, form.dbType]);
 
+  const canRunTest = Boolean(form.configId && form.queryText.trim());
+
+  const resetTestRun = useCallback(() => {
+    setTestRunVisible(false);
+    setTestRunAlert(null);
+    setTestRunLoading(false);
+    setTestRunResult(null);
+    setTestRunPage(0);
+  }, []);
+
   const refreshSidebarQueries = useCallback(async () => {
     if (!onQueriesChanged) return;
     await onQueriesChanged();
   }, [onQueriesChanged]);
+
+  const runTestQuery = useCallback(
+    async (page) => {
+      const queryText = form.queryText.trim();
+      const configId = Number.parseInt(form.configId, 10);
+
+      if (!queryText) {
+        setTestRunVisible(true);
+        setTestRunAlert({
+          message: "Please enter a SQL query first.",
+          type: "alert-error",
+        });
+        return;
+      }
+
+      if (!configId) {
+        setTestRunVisible(true);
+        setTestRunAlert({
+          message: "Please select a connection.",
+          type: "alert-error",
+        });
+        return;
+      }
+
+      setTestRunVisible(true);
+      setTestRunAlert(null);
+      setTestRunLoading(true);
+      setTestRunResult(null);
+
+      try {
+        const result = await executeTempQuery({
+          configId,
+          queryText,
+          page,
+          pageSize: 10,
+        });
+
+        if (result.error) {
+          setTestRunAlert({ message: result.error, type: "alert-error" });
+          return;
+        }
+
+        setTestRunPage(result.page ?? page);
+        setTestRunResult(result);
+      } catch {
+        setTestRunAlert({
+          message: "Test run failed. Check your query and connection.",
+          type: "alert-error",
+        });
+      } finally {
+        setTestRunLoading(false);
+      }
+    },
+    [form.configId, form.queryText],
+  );
 
   const handleSaveQuery = async () => {
     setFormAlert(null);
@@ -130,6 +202,7 @@ function ReportConfigPanel({ onQueriesChanged }) {
           message: `Query "${result.name}" saved successfully.`,
           type: "alert-success",
         });
+        resetTestRun();
         setForm(initialForm);
         setShowAddForm(false);
         await loadReportData();
@@ -192,6 +265,7 @@ function ReportConfigPanel({ onQueriesChanged }) {
           type="button"
           className="btn btn-primary"
           onClick={() => {
+            resetTestRun();
             setShowAddForm((previous) => !previous);
             setFormAlert(null);
           }}
@@ -226,6 +300,7 @@ function ReportConfigPanel({ onQueriesChanged }) {
                 value={form.dbType}
                 onChange={(event) => {
                   const value = event.target.value;
+                  resetTestRun();
                   setForm((previous) => ({ ...previous, dbType: value, configId: "" }));
                 }}
               >
@@ -244,9 +319,10 @@ function ReportConfigPanel({ onQueriesChanged }) {
             <select
               id="report-query-config"
               value={form.configId}
-              onChange={(event) =>
-                setForm((previous) => ({ ...previous, configId: event.target.value }))
-              }
+              onChange={(event) => {
+                resetTestRun();
+                setForm((previous) => ({ ...previous, configId: event.target.value }));
+              }}
               disabled={!form.dbType}
             >
               {!form.dbType ? (
@@ -289,9 +365,10 @@ function ReportConfigPanel({ onQueriesChanged }) {
               rows={5}
               placeholder="e.g. SELECT * FROM customers WHERE active = true"
               value={form.queryText}
-              onChange={(event) =>
-                setForm((previous) => ({ ...previous, queryText: event.target.value }))
-              }
+              onChange={(event) => {
+                resetTestRun();
+                setForm((previous) => ({ ...previous, queryText: event.target.value }));
+              }}
             />
           </div>
 
@@ -299,7 +376,114 @@ function ReportConfigPanel({ onQueriesChanged }) {
             <button className="btn btn-primary" onClick={handleSaveQuery} disabled={savingQuery}>
               {savingQuery ? "Saving..." : "Save Query"}
             </button>
+            <button
+              className="btn btn-success"
+              onClick={() => {
+                setTestRunPage(0);
+                runTestQuery(0);
+              }}
+              disabled={!canRunTest || testRunLoading}
+            >
+              {testRunLoading ? "Running..." : "Test Run"}
+            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={() => {
+                setForm(initialForm);
+                setFormAlert(null);
+                resetTestRun();
+              }}
+            >
+              Clear
+            </button>
           </div>
+
+          {testRunVisible && (
+            <div className="workspace-test-run-area">
+              <div className="workspace-test-run-title">Test Run Results</div>
+
+              {testRunAlert && (
+                <div className={`alert ${testRunAlert.type} show`}>{testRunAlert.message}</div>
+              )}
+
+              {testRunLoading && <div className="spinner show">Running test query...</div>}
+
+              {!testRunLoading && testRunResult && (
+                <>
+                  <div className="workspace-test-run-summary">
+                    <strong>Test passed.</strong> <strong>Total Rows:</strong>{" "}
+                    {testRunResult.totalRows} <strong>Page:</strong> {testRunResult.page + 1} of{" "}
+                    {testRunResult.totalPages} <strong>Columns:</strong>{" "}
+                    {Array.isArray(testRunResult.columns) ? testRunResult.columns.length : 0}
+                  </div>
+
+                  {Array.isArray(testRunResult.rows) && testRunResult.rows.length > 0 ? (
+                    <div className="table-wrapper">
+                      <table>
+                        <thead>
+                          <tr>
+                            {(Array.isArray(testRunResult.columns)
+                              ? testRunResult.columns
+                              : []
+                            ).map((column) => (
+                              <th key={column}>{column}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {testRunResult.rows.map((row, rowIndex) => (
+                            <tr
+                              key={`${rowIndex}-${Array.isArray(row) ? row.join("|") : rowIndex}`}
+                            >
+                              {(Array.isArray(row) ? row : []).map((cell, cellIndex) => (
+                                <td key={`${rowIndex}-${cellIndex}`}>
+                                  {cell === "NULL" ? (
+                                    <span style={{ color: "#999", fontStyle: "italic" }}>
+                                      NULL
+                                    </span>
+                                  ) : (
+                                    cell
+                                  )}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="empty-state">Query returned no results.</div>
+                  )}
+
+                  {testRunResult.totalPages > 1 && (
+                    <div className="pagination">
+                      <button
+                        onClick={() => {
+                          if (testRunPage > 0) runTestQuery(testRunPage - 1);
+                        }}
+                        disabled={testRunPage === 0}
+                      >
+                        Prev
+                      </button>
+                      <span>
+                        Page {testRunPage + 1} of {testRunResult.totalPages}
+                      </span>
+                      <button
+                        onClick={() => {
+                          if (testRunPage < testRunResult.totalPages - 1) {
+                            runTestQuery(testRunPage + 1);
+                          }
+                        }}
+                        disabled={testRunPage >= testRunResult.totalPages - 1}
+                      >
+                        Next
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
 

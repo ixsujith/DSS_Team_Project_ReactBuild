@@ -9,5 +9,5 @@ public class QueryRequest {
     private String name;
     private String description;
     private String queryText;
-    private String dbType;
+    private Integer configId;
 }

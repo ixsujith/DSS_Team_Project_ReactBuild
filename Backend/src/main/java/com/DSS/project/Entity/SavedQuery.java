@@ -27,6 +27,9 @@ public class SavedQuery {
     @Column(name = "db_type", nullable = false)
     private String dbType;
 
+    @Column(name = "config_id", nullable = false)
+    private Integer configId;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 

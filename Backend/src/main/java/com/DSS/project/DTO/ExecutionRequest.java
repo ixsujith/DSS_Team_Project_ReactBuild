@@ -7,7 +7,6 @@ import lombok.Data;
 public class ExecutionRequest {
 
     private Integer queryId;
-    private Integer configId;
     private Integer page;
     private Integer pageSize;
 }

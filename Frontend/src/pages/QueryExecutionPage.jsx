@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   executeQuery,
   executeTempQuery,
+  getAllDbConfigs,
   getAllDbTypes,
+  getAllQueries,
   getConfigsByDbType,
-  getQueriesByDbType,
 } from "../api/client";
 
 function highlightMatch(text, term) {
@@ -68,19 +69,12 @@ function ResultTable({ columns, rows }) {
 }
 
 function QueryExecutionPage() {
-  const [dbTypes, setDbTypes] = useState([]);
-
   const [executionAlert, setExecutionAlert] = useState(null);
-  const [selectedDbType, setSelectedDbType] = useState("");
-  const [connections, setConnections] = useState([]);
-  const [loadingConnections, setLoadingConnections] = useState(false);
-  const [selectedConfigId, setSelectedConfigId] = useState("");
-
-  const [allQueriesForType, setAllQueriesForType] = useState([]);
-  const [querySearchTerm, setQuerySearchTerm] = useState("");
-  const [showSearchResults, setShowSearchResults] = useState(false);
+  const [allQueries, setAllQueries] = useState([]);
+  const [allConfigs, setAllConfigs] = useState([]);
+  const [queriesLoading, setQueriesLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
   const [selectedQuery, setSelectedQuery] = useState(null);
-  const [loadingQueries, setLoadingQueries] = useState(false);
 
   const [currentPage, setCurrentPage] = useState(0);
   const [currentPageSize, setCurrentPageSize] = useState(50);
@@ -88,6 +82,7 @@ function QueryExecutionPage() {
   const [resultCardVisible, setResultCardVisible] = useState(false);
   const [executionResult, setExecutionResult] = useState(null);
 
+  const [dbTypes, setDbTypes] = useState([]);
   const [scratchpadOpen, setScratchpadOpen] = useState(false);
   const [scratchAlert, setScratchAlert] = useState(null);
   const [scratchDbType, setScratchDbType] = useState("");
@@ -101,156 +96,78 @@ function QueryExecutionPage() {
   const [scratchResult, setScratchResult] = useState(null);
   const [scratchResultsVisible, setScratchResultsVisible] = useState(false);
 
-  const querySearchWrapperRef = useRef(null);
-  const resultsCardRef = useRef(null);
-
-  const completedSteps = selectedQuery ? 3 : selectedConfigId ? 2 : selectedDbType ? 1 : 0;
+  const configNameById = useMemo(() => {
+    const map = new Map();
+    allConfigs.forEach((config) => {
+      map.set(String(config.configId), config.dbName);
+    });
+    return map;
+  }, [allConfigs]);
 
   const filteredQueries = useMemo(() => {
-    const term = querySearchTerm.trim().toLowerCase();
-    if (!term) return allQueriesForType;
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return allQueries;
 
-    return allQueriesForType.filter((query) => {
+    return allQueries.filter((query) => {
       const name = query.name?.toLowerCase() || "";
       const description = query.description?.toLowerCase() || "";
-      return name.includes(term) || description.includes(term);
+      const dbType = query.dbType?.toLowerCase() || "";
+      const connectionName = (
+        configNameById.get(String(query.configId)) || ""
+      ).toLowerCase();
+
+      return (
+        name.includes(term) ||
+        description.includes(term) ||
+        dbType.includes(term) ||
+        connectionName.includes(term)
+      );
     });
-  }, [allQueriesForType, querySearchTerm]);
+  }, [allQueries, configNameById, searchTerm]);
 
-  const resetMainResults = useCallback(() => {
-    setResultCardVisible(false);
-    setExecutionLoading(false);
-    setExecutionResult(null);
-    setCurrentPage(0);
-  }, []);
-
-  const resetSelectedQuery = useCallback(() => {
-    setSelectedQuery(null);
-    setQuerySearchTerm("");
-    setShowSearchResults(false);
+  const loadExecutionData = useCallback(async () => {
+    setQueriesLoading(true);
+    setExecutionAlert(null);
+    try {
+      const [queries, configs] = await Promise.all([getAllQueries(), getAllDbConfigs()]);
+      setAllQueries(Array.isArray(queries) ? queries : []);
+      setAllConfigs(Array.isArray(configs) ? configs : []);
+    } catch {
+      setExecutionAlert({
+        message: "Failed to load saved queries.",
+        type: "alert-error",
+      });
+      setAllQueries([]);
+      setAllConfigs([]);
+    } finally {
+      setQueriesLoading(false);
+    }
   }, []);
 
   const loadDbTypes = useCallback(async () => {
     try {
       const types = await getAllDbTypes();
-      if (!Array.isArray(types) || types.length === 0) {
-        setDbTypes([]);
-        setExecutionAlert({
-          message: "No DB configurations found. Please add one on the DB Config page.",
-          type: "alert-info",
-        });
-        return;
-      }
-
-      setDbTypes(types);
+      setDbTypes(Array.isArray(types) ? types : []);
     } catch {
-      setExecutionAlert({
-        message: "Failed to load DB types. Is the backend running?",
-        type: "alert-error",
-      });
+      setDbTypes([]);
     }
   }, []);
 
   useEffect(() => {
+    loadExecutionData();
     loadDbTypes();
-  }, [loadDbTypes]);
+  }, [loadDbTypes, loadExecutionData]);
 
-  useEffect(() => {
-    const onDocumentClick = (event) => {
-      if (!querySearchWrapperRef.current?.contains(event.target)) {
-        setShowSearchResults(false);
-      }
-    };
-
-    document.addEventListener("click", onDocumentClick);
-    return () => document.removeEventListener("click", onDocumentClick);
-  }, []);
-
-  const handleDbTypeChange = async (event) => {
-    const dbType = event.target.value;
-    setExecutionAlert(null);
-    setSelectedDbType(dbType);
-    setSelectedConfigId("");
-    setConnections([]);
-    setAllQueriesForType([]);
-    resetSelectedQuery();
-    resetMainResults();
-
-    if (!dbType) return;
-
-    setLoadingConnections(true);
-    try {
-      const configs = await getConfigsByDbType(dbType);
-      if (!Array.isArray(configs) || configs.length === 0) {
-        setExecutionAlert({
-          message: `No connections found for "${dbType}". Add one on the DB Config page.`,
-          type: "alert-info",
-        });
-        setConnections([]);
-        return;
-      }
-
-      setConnections(configs);
-    } catch {
-      setExecutionAlert({
-        message: "Failed to load connections. Please try again.",
-        type: "alert-error",
-      });
-      setConnections([]);
-    } finally {
-      setLoadingConnections(false);
-    }
-  };
-
-  const handleConnectionChange = async (event) => {
-    const configId = event.target.value;
-    setExecutionAlert(null);
-    setSelectedConfigId(configId);
-    setAllQueriesForType([]);
-    resetSelectedQuery();
-    resetMainResults();
-
-    if (!configId || !selectedDbType) return;
-
-    setLoadingQueries(true);
-    try {
-      const queries = await getQueriesByDbType(selectedDbType);
-      const safeQueries = Array.isArray(queries) ? queries : [];
-      setAllQueriesForType(safeQueries);
-
-      if (safeQueries.length === 0) {
-        setExecutionAlert({
-          message: `No queries found for "${selectedDbType}". Go to Query Management to add one.`,
-          type: "alert-info",
-        });
-      }
-    } catch {
-      setExecutionAlert({
-        message: "Failed to load queries. Please try again.",
-        type: "alert-error",
-      });
-    } finally {
-      setLoadingQueries(false);
-    }
-  };
-
-  const runExecution = useCallback(
-    async (page, pageSize = currentPageSize) => {
-      if (!selectedQuery || !selectedConfigId) return;
-
+  const runExecutionById = useCallback(
+    async (queryId, page, pageSize = currentPageSize) => {
       setExecutionAlert(null);
       setResultCardVisible(true);
       setExecutionLoading(true);
       setExecutionResult(null);
 
-      requestAnimationFrame(() => {
-        resultsCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
-
       try {
         const result = await executeQuery({
-          queryId: selectedQuery.queryId,
-          configId: Number(selectedConfigId),
+          queryId,
           page,
           pageSize,
         });
@@ -273,31 +190,22 @@ function QueryExecutionPage() {
         setExecutionLoading(false);
       }
     },
-    [currentPageSize, selectedConfigId, selectedQuery],
+    [currentPageSize],
   );
 
-  const handleExecute = () => {
+  const handleRunQuery = (query) => {
+    setSelectedQuery(query);
     setCurrentPage(0);
-    runExecution(0, currentPageSize);
+    runExecutionById(query.queryId, 0, currentPageSize);
   };
 
   const handlePageSizeChange = (event) => {
     const value = Number.parseInt(event.target.value, 10);
     setCurrentPageSize(value);
     setCurrentPage(0);
-    if (selectedQuery && selectedConfigId) {
-      runExecution(0, value);
+    if (selectedQuery) {
+      runExecutionById(selectedQuery.queryId, 0, value);
     }
-  };
-
-  const handleResetMain = () => {
-    setExecutionAlert(null);
-    setSelectedDbType("");
-    setConnections([]);
-    setSelectedConfigId("");
-    setAllQueriesForType([]);
-    resetSelectedQuery();
-    resetMainResults();
   };
 
   const runScratchQuery = useCallback(
@@ -364,9 +272,7 @@ function QueryExecutionPage() {
     setScratchConnectionsLoading(true);
     try {
       const configs = await getConfigsByDbType(dbType);
-      if (Array.isArray(configs)) {
-        setScratchConnections(configs);
-      }
+      setScratchConnections(Array.isArray(configs) ? configs : []);
     } catch {
       setScratchAlert({ message: "Failed to load connections.", type: "alert-error" });
       setScratchConnections([]);
@@ -385,15 +291,6 @@ function QueryExecutionPage() {
     setScratchResult(null);
     setScratchPage(0);
   };
-
-  const searchPlaceholder = (() => {
-    if (!selectedConfigId) return "Select a connection first...";
-    if (loadingQueries) return "Loading queries...";
-    if (allQueriesForType.length === 0) {
-      return selectedDbType ? `No queries saved for ${selectedDbType}` : "No queries found";
-    }
-    return `Search ${allQueriesForType.length} saved queries...`;
-  })();
 
   return (
     <div className="container query-execution-page">
@@ -585,205 +482,139 @@ function QueryExecutionPage() {
       </div>
 
       <div className="card">
-        <h2 className="card-title">Select and Execute</h2>
-
-        <div className="steps">
-          <div className={`step ${completedSteps > 0 ? "done" : completedSteps === 0 ? "active" : ""}`}>
-            <div className="step-circle">1</div>
-            <div className="step-label">DB Type</div>
-          </div>
-          <div className={`step-line ${completedSteps >= 2 ? "done" : ""}`} />
-          <div className={`step ${completedSteps > 1 ? "done" : completedSteps === 1 ? "active" : ""}`}>
-            <div className="step-circle">2</div>
-            <div className="step-label">Connection</div>
-          </div>
-          <div className={`step-line ${completedSteps >= 3 ? "done" : ""}`} />
-          <div className={`step ${completedSteps === 2 ? "active" : completedSteps > 2 ? "done" : ""}`}>
-            <div className="step-circle">3</div>
-            <div className="step-label">Query</div>
-          </div>
-        </div>
+        <h2 className="card-title">Saved Queries</h2>
 
         {executionAlert && (
           <div className={`alert ${executionAlert.type} show`}>{executionAlert.message}</div>
         )}
 
-        <div className="form-group">
-          <label htmlFor="dbTypeSelect">Step 1 — Select Database Type</label>
-          <select id="dbTypeSelect" value={selectedDbType} onChange={handleDbTypeChange}>
-            <option value="">-- Select DB Type --</option>
-            {dbTypes.map((type) => (
-              <option key={`exec-${type}`} value={type}>
-                {type}
-              </option>
-            ))}
-          </select>
+        <div className="form-group" style={{ marginBottom: "12px" }}>
+          <label htmlFor="querySearch">Search</label>
+          <input
+            id="querySearch"
+            type="text"
+            placeholder="Search by query name, description, db type, or connection..."
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+          />
         </div>
 
-        <div className="form-group">
-          <label htmlFor="connectionSelect">Step 2 — Select Connection</label>
-          <select
-            id="connectionSelect"
-            value={selectedConfigId}
-            onChange={handleConnectionChange}
-            disabled={!selectedDbType || loadingConnections}
-          >
-            {!selectedDbType ? (
-              <option value="">-- Select a DB Type first --</option>
-            ) : loadingConnections ? (
-              <option value="">-- Loading connections... --</option>
-            ) : connections.length === 0 ? (
-              <option value="">-- No connections available --</option>
-            ) : (
-              <>
-                <option value="">-- Select Connection --</option>
-                {connections.map((config) => (
-                  <option key={config.configId} value={config.configId}>
-                    {config.dbName}
-                  </option>
-                ))}
-              </>
-            )}
-          </select>
+        <div className="search-count" style={{ marginBottom: "14px" }}>
+          {filteredQueries.length === allQueries.length
+            ? `${allQueries.length} saved queries`
+            : `Showing ${filteredQueries.length} of ${allQueries.length} saved queries`}
         </div>
 
-        <div className="form-group">
-          <label>Step 3 — Search and Select Query</label>
-          <div className="search-wrapper" ref={querySearchWrapperRef}>
-            <span className="search-icon">?</span>
-            <input
-              type="text"
-              value={querySearchTerm}
-              onChange={(event) => {
-                setQuerySearchTerm(event.target.value);
-                if (!showSearchResults) {
-                  setShowSearchResults(true);
-                }
-              }}
-              onFocus={() => {
-                if (allQueriesForType.length > 0) {
-                  setShowSearchResults(true);
-                }
-              }}
-              placeholder={searchPlaceholder}
-              disabled={!selectedConfigId || allQueriesForType.length === 0}
-              autoComplete="off"
-            />
-            <div className={`search-results ${showSearchResults ? "open" : ""}`}>
-              {filteredQueries.length === 0 ? (
-                <div className="search-no-results">
-                  No queries match "{querySearchTerm.trim()}"
-                </div>
-              ) : (
-                filteredQueries.map((query) => (
-                  <div
+        {queriesLoading && <div className="spinner show">Loading saved queries...</div>}
+
+        {!queriesLoading && filteredQueries.length > 0 && (
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Name</th>
+                  <th>Description</th>
+                  <th>Connection</th>
+                  <th>DB Type</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredQueries.map((query, index) => (
+                  <tr
                     key={query.queryId}
-                    className="search-result-item"
-                    onClick={() => {
-                      setSelectedQuery(query);
-                      setQuerySearchTerm("");
-                      setShowSearchResults(false);
+                    style={{
+                      backgroundColor:
+                        selectedQuery?.queryId === query.queryId ? "#f0f6ff" : undefined,
                     }}
                   >
-                    <div className="query-name">
-                      {highlightMatch(query.name, querySearchTerm)}
-                    </div>
-                    {query.description && (
-                      <div className="query-desc">{query.description}</div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div className={`selected-query-badge ${selectedQuery ? "show" : ""}`}>
-            <span>Selected query:</span>
-            <span className="badge-name">{selectedQuery?.name}</span>
-            <button
-              className="badge-clear"
-              title="Clear selection"
-              onClick={() => {
-                resetSelectedQuery();
-                resetMainResults();
-              }}
-            >
-              x
-            </button>
-          </div>
-        </div>
-
-        {selectedQuery && (
-          <div>
-            <div className="form-group">
-              <label>Query Preview</label>
-              <div
-                style={{
-                  background: "#f0f2f5",
-                  border: "1px solid #d1d9e0",
-                  borderRadius: "6px",
-                  padding: "12px 16px",
-                  fontFamily: '"Courier New", monospace',
-                  fontSize: "13px",
-                  color: "#1e3a5f",
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                }}
-              >
-                {selectedQuery.queryText}
-              </div>
-            </div>
-
-            {selectedQuery.description && (
-              <div
-                style={{
-                  fontSize: "13px",
-                  color: "#666",
-                  marginBottom: "16px",
-                  fontStyle: "italic",
-                }}
-              >
-                {selectedQuery.description}
-              </div>
-            )}
+                    <td>{index + 1}</td>
+                    <td>
+                      <strong>{highlightMatch(query.name, searchTerm)}</strong>
+                    </td>
+                    <td>
+                      {query.description ? (
+                        highlightMatch(query.description, searchTerm)
+                      ) : (
+                        <span style={{ color: "#999" }}>—</span>
+                      )}
+                    </td>
+                    <td>{configNameById.get(String(query.configId)) || `#${query.configId}`}</td>
+                    <td>
+                      <span className="badge badge-info">{query.dbType}</span>
+                    </td>
+                    <td>
+                      <button
+                        className="btn btn-success"
+                        style={{ padding: "6px 14px", fontSize: "12px" }}
+                        onClick={() => handleRunQuery(query)}
+                      >
+                        Run
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
 
-        <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
-          <div
-            className="form-group"
-            style={{ margin: 0, display: "flex", alignItems: "center", gap: "8px" }}
-          >
-            <label style={{ margin: 0, whiteSpace: "nowrap" }}>Rows per page</label>
-            <select
-              value={currentPageSize}
-              onChange={handlePageSizeChange}
-              style={{ width: "80px", padding: "8px" }}
-            >
-              <option value="10">10</option>
-              <option value="25">25</option>
-              <option value="50">50</option>
-              <option value="100">100</option>
-            </select>
+        {!queriesLoading && filteredQueries.length === 0 && (
+          <div className="empty-state">
+            {searchTerm.trim()
+              ? `No saved query matches "${searchTerm.trim()}".`
+              : "No saved queries found."}
           </div>
-
-          <button
-            className="btn btn-success"
-            onClick={handleExecute}
-            disabled={!selectedQuery || !selectedConfigId}
-          >
-            Execute Query
-          </button>
-
-          <button className="btn btn-secondary" onClick={handleResetMain}>
-            Reset
-          </button>
-        </div>
+        )}
       </div>
 
+      {selectedQuery && (
+        <div className="card">
+          <h2 className="card-title">Selected Query</h2>
+          <div className="form-group">
+            <label>Query Preview</label>
+            <div
+              style={{
+                background: "#f0f2f5",
+                border: "1px solid #d1d9e0",
+                borderRadius: "6px",
+                padding: "12px 16px",
+                fontFamily: '"Courier New", monospace',
+                fontSize: "13px",
+                color: "#1e3a5f",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+              }}
+            >
+              {selectedQuery.queryText}
+            </div>
+          </div>
+        </div>
+      )}
+
       {resultCardVisible && (
-        <div ref={resultsCardRef} className="card">
+        <div className="card">
           <h2 className="card-title">Query Results</h2>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
+            <div
+              className="form-group"
+              style={{ margin: 0, display: "flex", alignItems: "center", gap: "8px" }}
+            >
+              <label style={{ margin: 0, whiteSpace: "nowrap" }}>Rows per page</label>
+              <select
+                value={currentPageSize}
+                onChange={handlePageSizeChange}
+                style={{ width: "80px", padding: "8px" }}
+              >
+                <option value="10">10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </div>
+          </div>
 
           {executionResult && (
             <div
@@ -791,6 +622,7 @@ function QueryExecutionPage() {
                 fontSize: "13px",
                 color: "#555",
                 marginBottom: "16px",
+                marginTop: "14px",
                 display: "flex",
                 gap: "24px",
                 flexWrap: "wrap",
@@ -816,10 +648,7 @@ function QueryExecutionPage() {
             Array.isArray(executionResult.rows) &&
             executionResult.rows.length > 0 && (
               <div className="table-wrapper">
-                <ResultTable
-                  columns={executionResult.columns}
-                  rows={executionResult.rows}
-                />
+                <ResultTable columns={executionResult.columns} rows={executionResult.rows} />
               </div>
             )}
 
@@ -836,8 +665,8 @@ function QueryExecutionPage() {
               <div className="pagination">
                 <button
                   onClick={() => {
-                    if (currentPage > 0) {
-                      runExecution(currentPage - 1, currentPageSize);
+                    if (currentPage > 0 && selectedQuery) {
+                      runExecutionById(selectedQuery.queryId, currentPage - 1, currentPageSize);
                     }
                   }}
                   disabled={currentPage === 0}
@@ -849,8 +678,11 @@ function QueryExecutionPage() {
                 </span>
                 <button
                   onClick={() => {
-                    if (currentPage < executionResult.totalPages - 1) {
-                      runExecution(currentPage + 1, currentPageSize);
+                    if (
+                      selectedQuery &&
+                      currentPage < executionResult.totalPages - 1
+                    ) {
+                      runExecutionById(selectedQuery.queryId, currentPage + 1, currentPageSize);
                     }
                   }}
                   disabled={currentPage >= executionResult.totalPages - 1}

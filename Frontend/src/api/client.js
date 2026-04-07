@@ -1,5 +1,25 @@
 const BASE_URL = "http://localhost:8080/api";
 
+async function parseResponse(response) {
+  let data = null;
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    return {
+      error:
+        data?.error ||
+        data?.message ||
+        `Request failed with status ${response.status}`,
+    };
+  }
+
+  return data;
+}
+
 export async function testConnection(data) {
   const response = await fetch(`${BASE_URL}/db-config/test`, {
     method: "POST",
@@ -74,7 +94,7 @@ export async function executeQuery(data) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
-  return response.json();
+  return parseResponse(response);
 }
 
 export async function executeTempQuery(data) {
@@ -83,7 +103,7 @@ export async function executeTempQuery(data) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
-  return response.json();
+  return parseResponse(response);
 }
 
 export async function getAllAuditLogs() {

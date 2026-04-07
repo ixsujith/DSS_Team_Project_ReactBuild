@@ -1,6 +1,7 @@
 package com.DSS.project.Service;
 
 import com.DSS.project.DTO.QueryRequest;
+import com.DSS.project.Entity.DBConfig;
 import com.DSS.project.Entity.SavedQuery;
 import com.DSS.project.Exception.InvalidQueryException;
 import com.DSS.project.Exception.ResourceNotFoundException;
@@ -8,7 +9,6 @@ import com.DSS.project.Repository.QueryRepository;
 import lombok.RequiredArgsConstructor;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import org.springframework.stereotype.Service;
-import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.List;
 
@@ -19,15 +19,9 @@ public class QueryService {
 
     private final QueryRepository queryRepository;
     private final AuditLogService auditLogService;
+    private final DBConfigService dbConfigService;
 
     public SavedQuery saveQuery(QueryRequest request) {
-
-        // Pre-stage — Strip SQL comments before any validation
-        String sanitized = request.getQueryText()
-                .replaceAll("--[^\n]*", "")          // removes single-line comments
-                .replaceAll("/\\*.*?\\*/", "")        // removes multi-line comments
-                .trim();
-
         // ── Stage 0 — Null and empty field validation ──
         if (request.getName() == null || request.getName().isBlank()) {
             throw new InvalidQueryException("Query name cannot be empty.");
@@ -35,9 +29,18 @@ public class QueryService {
         if (request.getQueryText() == null || request.getQueryText().isBlank()) {
             throw new InvalidQueryException("Query text cannot be empty.");
         }
-        if (request.getDbType() == null || request.getDbType().isBlank()) {
-            throw new InvalidQueryException("DB type cannot be empty.");
+        if (request.getConfigId() == null || request.getConfigId() <= 0) {
+            throw new InvalidQueryException("A valid connection must be selected.");
         }
+
+        DBConfig config = dbConfigService.getConfigById(request.getConfigId());
+        String queryDbType = config.getDbType().toUpperCase();
+
+        // Pre-stage — Strip SQL comments before any validation
+        String sanitized = request.getQueryText()
+                .replaceAll("--[^\n]*", "")          // removes single-line comments
+                .replaceAll("/\\*.*?\\*/", "")        // removes multi-line comments
+                .trim();
 
         // Stage 1 — For validation syntax using JSQLParser
         try {
@@ -45,7 +48,7 @@ public class QueryService {
         } catch (Exception e) {
             auditLogService.logFailure(
                     request.getQueryText(),
-                    request.getDbType(),
+                    queryDbType,
                     "Syntax error: " + e.getMessage()
             );
             throw new InvalidQueryException("Invalid SQL syntax: " + e.getMessage());
@@ -61,7 +64,7 @@ public class QueryService {
         if (withoutTrailing.contains(";")) {
             auditLogService.logFailure(
                     request.getQueryText(),
-                    request.getDbType(),
+                    queryDbType,
                     "Rejected: Multiple statements are not allowed"
             );
             throw new InvalidQueryException(
@@ -69,11 +72,11 @@ public class QueryService {
         }
 
         // Stage 2.2 — Checks if the given query is a DQL (SELECT)
-        String normalized = request.getQueryText().trim().toUpperCase();
+        String normalized = sanitized.toUpperCase();
         if (!normalized.startsWith("SELECT")) {
             auditLogService.logFailure(
                     request.getQueryText(),
-                    request.getDbType(),
+                    queryDbType,
                     "Rejected: Only SELECT queries are permitted"
             );
             throw new InvalidQueryException("Only SELECT queries are allowed.");
@@ -90,7 +93,8 @@ public class QueryService {
         query.setName(request.getName());
         query.setDescription(request.getDescription());
         query.setQueryText(request.getQueryText());
-        query.setDbType(request.getDbType().toUpperCase());
+        query.setDbType(queryDbType);
+        query.setConfigId(config.getConfigId());
 
         return queryRepository.save(query);
     }

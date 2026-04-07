@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   deleteQuery,
   executeTempQuery,
+  getAllDbConfigs,
   getAllDbTypes,
   getAllQueries,
   getConfigsByDbType,
@@ -51,22 +52,21 @@ function QueryManagementPage() {
 
   const [form, setForm] = useState({
     name: "",
-    dbType: "",
+    configId: "",
     description: "",
     queryText: "",
   });
   const [formAlert, setFormAlert] = useState(null);
   const [savingQuery, setSavingQuery] = useState(false);
 
-  const [testConnections, setTestConnections] = useState([]);
-  const [loadingTestConnections, setLoadingTestConnections] = useState(false);
-  const [testConnectionId, setTestConnectionId] = useState("");
   const [testRunVisible, setTestRunVisible] = useState(false);
   const [testRunAlert, setTestRunAlert] = useState(null);
   const [testRunLoading, setTestRunLoading] = useState(false);
   const [testRunResult, setTestRunResult] = useState(null);
   const [testRunPage, setTestRunPage] = useState(0);
+  const [testRunPageSize, setTestRunPageSize] = useState(10);
 
+  const [allConfigs, setAllConfigs] = useState([]);
   const [allQueries, setAllQueries] = useState([]);
   const [tableLoading, setTableLoading] = useState(true);
   const [tableAlert, setTableAlert] = useState(null);
@@ -92,9 +92,17 @@ function QueryManagementPage() {
   const whereCounterRef = useRef(0);
   const queryNameInputRef = useRef(null);
 
-  const canRunTest = Boolean(testConnectionId && form.queryText.trim());
+  const canRunTest = Boolean(form.configId && form.queryText.trim());
   const builderStep2Enabled = Boolean(builderConfigId);
   const builderStep3Enabled = Boolean(builderTable);
+
+  const configNameById = useMemo(() => {
+    const map = new Map();
+    allConfigs.forEach((config) => {
+      map.set(String(config.configId), config.dbName);
+    });
+    return map;
+  }, [allConfigs]);
 
   const filteredQueries = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -196,43 +204,25 @@ function QueryManagementPage() {
     }
   }, []);
 
-  useEffect(() => {
-    loadDbTypes();
-    loadQueries();
-  }, [loadDbTypes, loadQueries]);
-
-  const loadTestConnections = useCallback(async (dbType, preferredConfigId = "") => {
-    if (!dbType) {
-      setTestConnections([]);
-      setTestConnectionId("");
-      return;
-    }
-
-    setLoadingTestConnections(true);
+  const loadConfigs = useCallback(async () => {
     try {
-      const configs = await getConfigsByDbType(dbType);
-      const safeConfigs = Array.isArray(configs) ? configs : [];
-      setTestConnections(safeConfigs);
-
-      if (preferredConfigId && safeConfigs.some((item) => String(item.configId) === String(preferredConfigId))) {
-        setTestConnectionId(String(preferredConfigId));
-      } else if (safeConfigs.length === 1) {
-        setTestConnectionId(String(safeConfigs[0].configId));
-      } else {
-        setTestConnectionId("");
-      }
+      const configs = await getAllDbConfigs();
+      setAllConfigs(Array.isArray(configs) ? configs : []);
     } catch {
-      setTestConnections([]);
-      setTestConnectionId("");
-    } finally {
-      setLoadingTestConnections(false);
+      setAllConfigs([]);
     }
   }, []);
 
+  useEffect(() => {
+    loadDbTypes();
+    loadConfigs();
+    loadQueries();
+  }, [loadConfigs, loadDbTypes, loadQueries]);
+
   const runTestQuery = useCallback(
-    async (page) => {
+    async (page, pageSize = testRunPageSize) => {
       const queryText = form.queryText.trim();
-      const configId = Number.parseInt(testConnectionId, 10);
+      const configId = Number.parseInt(form.configId, 10);
 
       if (!queryText) {
         setTestRunAlert({
@@ -260,7 +250,7 @@ function QueryManagementPage() {
           configId,
           queryText,
           page,
-          pageSize: 10,
+          pageSize,
         });
 
         if (result.error) {
@@ -279,7 +269,7 @@ function QueryManagementPage() {
         setTestRunLoading(false);
       }
     },
-    [form.queryText, testConnectionId],
+    [form.configId, form.queryText, testRunPageSize],
   );
 
   const resetBuilderState = () => {
@@ -482,9 +472,8 @@ function QueryManagementPage() {
 
     setForm((previous) => ({ ...previous, queryText: generatedSql }));
 
-    if (builderDbType) {
-      setForm((previous) => ({ ...previous, dbType: builderDbType }));
-      await loadTestConnections(builderDbType);
+    if (builderConfigId) {
+      setForm((previous) => ({ ...previous, configId: String(builderConfigId) }));
     }
 
     setBuilderOpen(false);
@@ -496,7 +485,7 @@ function QueryManagementPage() {
 
     const payload = {
       name: form.name.trim(),
-      dbType: form.dbType.trim(),
+      configId: Number.parseInt(form.configId, 10),
       description: form.description.trim(),
       queryText: form.queryText.trim(),
     };
@@ -510,9 +499,9 @@ function QueryManagementPage() {
       setFormAlert({ message: "Description is required.", type: "alert-error" });
       return;
     }
-    if (!payload.dbType) {
+    if (!payload.configId || Number.isNaN(payload.configId)) {
       setFormAlert({
-        message: "Please select a database type.",
+        message: "Please select a connection.",
         type: "alert-error",
       });
       return;
@@ -532,14 +521,12 @@ function QueryManagementPage() {
         });
         setForm({
           name: "",
-          dbType: "",
+          configId: "",
           description: "",
           queryText: "",
         });
-        setTestConnections([]);
-        setTestConnectionId("");
         resetTestRun();
-        await loadQueries();
+        await Promise.all([loadQueries(), loadConfigs()]);
         return;
       }
 
@@ -917,21 +904,20 @@ function QueryManagementPage() {
           </div>
 
           <div className="form-group">
-            <label htmlFor="dbType">Database Type</label>
+            <label htmlFor="configId">Connection</label>
             <select
-              id="dbType"
-              value={form.dbType}
-              onChange={async (event) => {
+              id="configId"
+              value={form.configId}
+              onChange={(event) => {
                 const value = event.target.value;
-                setForm((previous) => ({ ...previous, dbType: value }));
+                setForm((previous) => ({ ...previous, configId: value }));
                 resetTestRun();
-                await loadTestConnections(value, testConnectionId);
               }}
             >
-              <option value="">-- Select Type --</option>
-              {dbTypes.map((type) => (
-                <option key={`form-${type}`} value={type}>
-                  {type}
+              <option value="">-- Select Connection --</option>
+              {allConfigs.map((config) => (
+                <option key={`form-config-${config.configId}`} value={config.configId}>
+                  {config.dbName} ({config.dbType})
                 </option>
               ))}
             </select>
@@ -964,39 +950,6 @@ function QueryManagementPage() {
           />
         </div>
 
-        {form.dbType && testConnections.length > 0 && (
-          <div className="form-group">
-            <label htmlFor="testConnection">
-              Test Connection{" "}
-              <span style={{ color: "#888", fontWeight: 400, fontSize: "12px" }}>
-                required for test run
-              </span>
-            </label>
-            <select
-              id="testConnection"
-              value={testConnectionId}
-              onChange={(event) => {
-                setTestConnectionId(event.target.value);
-                resetTestRun();
-              }}
-              disabled={loadingTestConnections}
-            >
-              {loadingTestConnections ? (
-                <option value="">-- Loading... --</option>
-              ) : (
-                <>
-                  <option value="">-- Select Connection --</option>
-                  {testConnections.map((connection) => (
-                    <option key={connection.configId} value={connection.configId}>
-                      {connection.dbName}
-                    </option>
-                  ))}
-                </>
-              )}
-            </select>
-          </div>
-        )}
-
         <div className="btn-group">
           <button className="btn btn-primary" onClick={handleSaveQuery} disabled={savingQuery}>
             {savingQuery ? "Saving..." : "Save Query"}
@@ -1005,7 +958,7 @@ function QueryManagementPage() {
             className="btn btn-success"
             onClick={() => {
               setTestRunPage(0);
-              runTestQuery(0);
+              runTestQuery(0, testRunPageSize);
             }}
             disabled={!canRunTest}
           >
@@ -1016,18 +969,43 @@ function QueryManagementPage() {
             onClick={() => {
               setForm({
                 name: "",
-                dbType: "",
+                configId: "",
                 description: "",
                 queryText: "",
               });
-              setTestConnections([]);
-              setTestConnectionId("");
               resetTestRun();
               setFormAlert(null);
             }}
           >
             Clear
           </button>
+        </div>
+
+        <div
+          className="form-group"
+          style={{ marginTop: "12px", display: "flex", alignItems: "center", gap: "8px" }}
+        >
+          <label htmlFor="testRunPageSize" style={{ margin: 0, whiteSpace: "nowrap" }}>
+            Test rows per page
+          </label>
+          <select
+            id="testRunPageSize"
+            value={testRunPageSize}
+            onChange={(event) => {
+              const value = Number.parseInt(event.target.value, 10);
+              setTestRunPageSize(value);
+              setTestRunPage(0);
+              if (testRunResult) {
+                runTestQuery(0, value);
+              }
+            }}
+            style={{ width: "90px", padding: "8px" }}
+          >
+            <option value="10">10</option>
+            <option value="25">25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
         </div>
 
         {testRunVisible && (
@@ -1046,7 +1024,7 @@ function QueryManagementPage() {
                   <strong>Test passed.</strong> <strong>Total Rows:</strong>{" "}
                   {testRunResult.totalRows} <strong>Page:</strong> {testRunResult.page + 1} of{" "}
                   {testRunResult.totalPages} <strong>Columns:</strong>{" "}
-                  {testRunResult.columns.length}
+                  {Array.isArray(testRunResult.columns) ? testRunResult.columns.length : 0}
                 </div>
 
                 {Array.isArray(testRunResult.rows) && testRunResult.rows.length > 0 ? (
@@ -1054,15 +1032,20 @@ function QueryManagementPage() {
                     <table>
                       <thead>
                         <tr>
-                          {testRunResult.columns.map((column) => (
+                          {(Array.isArray(testRunResult.columns)
+                            ? testRunResult.columns
+                            : []
+                          ).map((column) => (
                             <th key={column}>{column}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
                         {testRunResult.rows.map((row, rowIndex) => (
-                          <tr key={`${rowIndex}-${row.join("|")}`}>
-                            {row.map((cell, cellIndex) => (
+                          <tr
+                            key={`${rowIndex}-${Array.isArray(row) ? row.join("|") : rowIndex}`}
+                          >
+                            {(Array.isArray(row) ? row : []).map((cell, cellIndex) => (
                               <td key={`${rowIndex}-${cellIndex}`}>
                                 {cell === "NULL" ? (
                                   <span style={{ color: "#999", fontStyle: "italic" }}>
@@ -1086,7 +1069,7 @@ function QueryManagementPage() {
                   <div className="pagination">
                     <button
                       onClick={() => {
-                        if (testRunPage > 0) runTestQuery(testRunPage - 1);
+                        if (testRunPage > 0) runTestQuery(testRunPage - 1, testRunPageSize);
                       }}
                       disabled={testRunPage === 0}
                     >
@@ -1098,7 +1081,7 @@ function QueryManagementPage() {
                     <button
                       onClick={() => {
                         if (testRunPage < testRunResult.totalPages - 1) {
-                          runTestQuery(testRunPage + 1);
+                          runTestQuery(testRunPage + 1, testRunPageSize);
                         }
                       }}
                       disabled={testRunPage >= testRunResult.totalPages - 1}
@@ -1176,6 +1159,7 @@ function QueryManagementPage() {
                   <th>#</th>
                   <th>Name</th>
                   <th>Description</th>
+                  <th>Connection</th>
                   <th>DB Type</th>
                   <th>Query Preview</th>
                   <th>Created At</th>
@@ -1204,6 +1188,9 @@ function QueryManagementPage() {
                         ) : (
                           <span style={{ color: "#999" }}>—</span>
                         )}
+                      </td>
+                      <td>
+                        <span>{configNameById.get(String(query.configId)) || `#${query.configId}`}</span>
                       </td>
                       <td>
                         <span className="badge badge-info">{query.dbType}</span>

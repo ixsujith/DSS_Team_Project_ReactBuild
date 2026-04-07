@@ -42,10 +42,10 @@ public class QueryExecutionService {
             throw new InvalidQueryException("Page size cannot exceed 500 rows.");
         }
 
-        // Step 1 — Validate configId is present
-        if (request.getConfigId() == null || request.getConfigId() <= 0) {
+        // Step 1 — Validate queryId is present
+        if (request.getQueryId() == null || request.getQueryId() <= 0) {
             throw new InvalidQueryException(
-                    "A valid configuration must be selected.");
+                    "A valid saved query must be selected.");
         }
 
         // Step 2 — Fetch the saved query
@@ -53,26 +53,33 @@ public class QueryExecutionService {
         String queryText      = savedQuery.getQueryText();
         String queryDbType    = savedQuery.getDbType();
 
-        // Step 3 — Fetch the DB config by configId
-        DBConfig config = dbConfigService.getConfigById(request.getConfigId());
-
-        // Step 4 — Validate config DB type matches query DB type
-        if (!config.getDbType().equalsIgnoreCase(queryDbType)) {
+        // Step 3 — Resolve linked DB config from saved query
+        if (savedQuery.getConfigId() == null || savedQuery.getConfigId() <= 0) {
             throw new InvalidQueryException(
-                    "Connection mismatch. Selected connection is for '" + config.getDbType() +
-                            "' but the query is saved for '" + queryDbType + "'."
+                    "Saved query is not mapped to a connection. Please re-save this query.");
+        }
+        DBConfig config = dbConfigService.getConfigById(savedQuery.getConfigId());
+
+        // Keep dbType source of truth aligned to linked connection
+        queryDbType = config.getDbType();
+
+        // Safety validation in case of stale data
+        if (savedQuery.getDbType() != null
+                && !savedQuery.getDbType().equalsIgnoreCase(queryDbType)) {
+            throw new InvalidQueryException(
+                    "Saved query DB type does not match linked connection DB type."
             );
         }
 
-        // Step 5 — Decrypt the password
+        // Step 4 — Decrypt the password
         String decryptedPassword = aesUtil.decrypt(config.getPassword());
 
-        // Step 6 — Build JDBC URL
+        // Step 5 — Build JDBC URL
         String url = dbConfigService.buildUrl(
                 queryDbType, config.getHost(), config.getPort(), config.getDatabaseName()
         );
 
-        // Step 7 — Execute with pagination
+        // Step 6 — Execute with pagination
         try (Connection conn = DriverManager.getConnection(
                 url, config.getUsername(), decryptedPassword)) {
 

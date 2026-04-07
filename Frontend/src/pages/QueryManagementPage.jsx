@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  deleteQuery,
   executeTempQuery,
   getAllDbConfigs,
   getAllDbTypes,
-  getAllQueries,
   getConfigsByDbType,
   getSchemaColumns,
   getSchemaTables,
@@ -16,42 +14,12 @@ const disabledBuilderStepStyle = {
   pointerEvents: "none",
 };
 
-function highlightMatch(text, term) {
-  const source = String(text ?? "");
-  const query = term.trim();
-  if (!query) return source;
-
-  const parts = [];
-  const lowerSource = source.toLowerCase();
-  const lowerQuery = query.toLowerCase();
-  let start = 0;
-  let matchIndex = lowerSource.indexOf(lowerQuery, start);
-
-  while (matchIndex !== -1) {
-    if (matchIndex > start) {
-      parts.push(source.slice(start, matchIndex));
-    }
-    parts.push(
-      <span key={`${source}-${matchIndex}`} className="highlight">
-        {source.slice(matchIndex, matchIndex + query.length)}
-      </span>,
-    );
-    start = matchIndex + query.length;
-    matchIndex = lowerSource.indexOf(lowerQuery, start);
-  }
-
-  if (start < source.length) {
-    parts.push(source.slice(start));
-  }
-
-  return parts;
-}
-
 function QueryManagementPage() {
   const [dbTypes, setDbTypes] = useState([]);
 
   const [form, setForm] = useState({
     name: "",
+    dbType: "",
     configId: "",
     description: "",
     queryText: "",
@@ -64,15 +32,8 @@ function QueryManagementPage() {
   const [testRunLoading, setTestRunLoading] = useState(false);
   const [testRunResult, setTestRunResult] = useState(null);
   const [testRunPage, setTestRunPage] = useState(0);
-  const [testRunPageSize, setTestRunPageSize] = useState(10);
 
   const [allConfigs, setAllConfigs] = useState([]);
-  const [allQueries, setAllQueries] = useState([]);
-  const [tableLoading, setTableLoading] = useState(true);
-  const [tableAlert, setTableAlert] = useState(null);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [filterDbType, setFilterDbType] = useState("");
-
   const [builderOpen, setBuilderOpen] = useState(false);
   const [builderAlert, setBuilderAlert] = useState(null);
   const [builderDbType, setBuilderDbType] = useState("");
@@ -96,27 +57,12 @@ function QueryManagementPage() {
   const builderStep2Enabled = Boolean(builderConfigId);
   const builderStep3Enabled = Boolean(builderTable);
 
-  const configNameById = useMemo(() => {
-    const map = new Map();
-    allConfigs.forEach((config) => {
-      map.set(String(config.configId), config.dbName);
-    });
-    return map;
-  }, [allConfigs]);
-
-  const filteredQueries = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
-
-    return allQueries.filter((query) => {
-      const typeMatches = filterDbType ? query.dbType === filterDbType : true;
-      if (!typeMatches) return false;
-      if (!term) return true;
-
-      const name = query.name?.toLowerCase() || "";
-      const description = query.description?.toLowerCase() || "";
-      return name.includes(term) || description.includes(term);
-    });
-  }, [allQueries, filterDbType, searchTerm]);
+  const formConnections = useMemo(() => {
+    if (!form.dbType) return [];
+    return allConfigs.filter(
+      (config) => (config.dbType || "").toUpperCase() === form.dbType.toUpperCase(),
+    );
+  }, [allConfigs, form.dbType]);
 
   const generatedSql = useMemo(() => {
     if (!builderTable) {
@@ -187,23 +133,6 @@ function QueryManagementPage() {
     }
   }, []);
 
-  const loadQueries = useCallback(async () => {
-    setTableLoading(true);
-    setTableAlert(null);
-    try {
-      const queries = await getAllQueries();
-      setAllQueries(Array.isArray(queries) ? queries : []);
-    } catch {
-      setAllQueries([]);
-      setTableAlert({
-        message: "Failed to load queries.",
-        type: "alert-error",
-      });
-    } finally {
-      setTableLoading(false);
-    }
-  }, []);
-
   const loadConfigs = useCallback(async () => {
     try {
       const configs = await getAllDbConfigs();
@@ -216,11 +145,10 @@ function QueryManagementPage() {
   useEffect(() => {
     loadDbTypes();
     loadConfigs();
-    loadQueries();
-  }, [loadConfigs, loadDbTypes, loadQueries]);
+  }, [loadConfigs, loadDbTypes]);
 
   const runTestQuery = useCallback(
-    async (page, pageSize = testRunPageSize) => {
+    async (page) => {
       const queryText = form.queryText.trim();
       const configId = Number.parseInt(form.configId, 10);
 
@@ -250,7 +178,7 @@ function QueryManagementPage() {
           configId,
           queryText,
           page,
-          pageSize,
+          pageSize: 10,
         });
 
         if (result.error) {
@@ -269,7 +197,7 @@ function QueryManagementPage() {
         setTestRunLoading(false);
       }
     },
-    [form.configId, form.queryText, testRunPageSize],
+    [form.configId, form.queryText],
   );
 
   const resetBuilderState = () => {
@@ -470,11 +398,12 @@ function QueryManagementPage() {
       return;
     }
 
-    setForm((previous) => ({ ...previous, queryText: generatedSql }));
-
-    if (builderConfigId) {
-      setForm((previous) => ({ ...previous, configId: String(builderConfigId) }));
-    }
+    setForm((previous) => ({
+      ...previous,
+      queryText: generatedSql,
+      dbType: builderDbType || previous.dbType,
+      configId: builderConfigId ? String(builderConfigId) : previous.configId,
+    }));
 
     setBuilderOpen(false);
     queryNameInputRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -493,6 +422,13 @@ function QueryManagementPage() {
     if (!payload.name) {
       setFormAlert({ message: "Query name is required.", type: "alert-error" });
       queryNameInputRef.current?.focus();
+      return;
+    }
+    if (!form.dbType) {
+      setFormAlert({
+        message: "Please select a database type.",
+        type: "alert-error",
+      });
       return;
     }
     if (!payload.description) {
@@ -521,12 +457,12 @@ function QueryManagementPage() {
         });
         setForm({
           name: "",
+          dbType: "",
           configId: "",
           description: "",
           queryText: "",
         });
         resetTestRun();
-        await Promise.all([loadQueries(), loadConfigs()]);
         return;
       }
 
@@ -541,38 +477,6 @@ function QueryManagementPage() {
       });
     } finally {
       setSavingQuery(false);
-    }
-  };
-
-  const handleDeleteQuery = async (id, name) => {
-    const confirmed = window.confirm(`Are you sure you want to delete "${name}"?`);
-    if (!confirmed) return;
-
-    try {
-      const response = await deleteQuery(id);
-      if (response.ok || response.status === 204) {
-        setTableAlert({
-          message: `Query "${name}" deleted successfully.`,
-          type: "alert-success",
-        });
-        await loadQueries();
-        return;
-      }
-
-      let message = "Failed to delete.";
-      try {
-        const body = await response.json();
-        if (body?.error) message = body.error;
-      } catch {
-        message = "Failed to delete.";
-      }
-
-      setTableAlert({ message, type: "alert-error" });
-    } catch {
-      setTableAlert({
-        message: "Something went wrong while deleting.",
-        type: "alert-error",
-      });
     }
   };
 
@@ -888,7 +792,7 @@ function QueryManagementPage() {
         <h2 className="card-title">Add New Query</h2>
         {formAlert && <div className={`alert ${formAlert.type} show`}>{formAlert.message}</div>}
 
-        <div className="form-row">
+        <div className="form-row form-row-three">
           <div className="form-group">
             <label htmlFor="queryName">Query Name</label>
             <input
@@ -904,6 +808,26 @@ function QueryManagementPage() {
           </div>
 
           <div className="form-group">
+            <label htmlFor="formDbType">Database Type</label>
+            <select
+              id="formDbType"
+              value={form.dbType}
+              onChange={(event) => {
+                const value = event.target.value;
+                setForm((previous) => ({ ...previous, dbType: value, configId: "" }));
+                resetTestRun();
+              }}
+            >
+              <option value="">-- Select DB Type --</option>
+              {dbTypes.map((type) => (
+                <option key={`form-dbtype-${type}`} value={type}>
+                  {type}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-group">
             <label htmlFor="configId">Connection</label>
             <select
               id="configId"
@@ -913,14 +837,26 @@ function QueryManagementPage() {
                 setForm((previous) => ({ ...previous, configId: value }));
                 resetTestRun();
               }}
+              disabled={!form.dbType}
             >
-              <option value="">-- Select Connection --</option>
-              {allConfigs.map((config) => (
-                <option key={`form-config-${config.configId}`} value={config.configId}>
-                  {config.dbName} ({config.dbType})
-                </option>
-              ))}
+              {!form.dbType ? (
+                <option value="">-- Select DB Type first --</option>
+              ) : (
+                <>
+                  <option value="">-- Select Connection --</option>
+                  {formConnections.map((config) => (
+                    <option key={`form-config-${config.configId}`} value={config.configId}>
+                      {config.dbName}
+                    </option>
+                  ))}
+                </>
+              )}
             </select>
+            {form.dbType && formConnections.length === 0 && (
+              <div style={{ fontSize: "12px", color: "#888", marginTop: "6px" }}>
+                No connections found for selected DB type.
+              </div>
+            )}
           </div>
         </div>
 
@@ -958,7 +894,7 @@ function QueryManagementPage() {
             className="btn btn-success"
             onClick={() => {
               setTestRunPage(0);
-              runTestQuery(0, testRunPageSize);
+              runTestQuery(0);
             }}
             disabled={!canRunTest}
           >
@@ -969,6 +905,7 @@ function QueryManagementPage() {
             onClick={() => {
               setForm({
                 name: "",
+                dbType: "",
                 configId: "",
                 description: "",
                 queryText: "",
@@ -979,33 +916,6 @@ function QueryManagementPage() {
           >
             Clear
           </button>
-        </div>
-
-        <div
-          className="form-group"
-          style={{ marginTop: "12px", display: "flex", alignItems: "center", gap: "8px" }}
-        >
-          <label htmlFor="testRunPageSize" style={{ margin: 0, whiteSpace: "nowrap" }}>
-            Test rows per page
-          </label>
-          <select
-            id="testRunPageSize"
-            value={testRunPageSize}
-            onChange={(event) => {
-              const value = Number.parseInt(event.target.value, 10);
-              setTestRunPageSize(value);
-              setTestRunPage(0);
-              if (testRunResult) {
-                runTestQuery(0, value);
-              }
-            }}
-            style={{ width: "90px", padding: "8px" }}
-          >
-            <option value="10">10</option>
-            <option value="25">25</option>
-            <option value="50">50</option>
-            <option value="100">100</option>
-          </select>
         </div>
 
         {testRunVisible && (
@@ -1069,7 +979,7 @@ function QueryManagementPage() {
                   <div className="pagination">
                     <button
                       onClick={() => {
-                        if (testRunPage > 0) runTestQuery(testRunPage - 1, testRunPageSize);
+                        if (testRunPage > 0) runTestQuery(testRunPage - 1);
                       }}
                       disabled={testRunPage === 0}
                     >
@@ -1081,7 +991,7 @@ function QueryManagementPage() {
                     <button
                       onClick={() => {
                         if (testRunPage < testRunResult.totalPages - 1) {
-                          runTestQuery(testRunPage + 1, testRunPageSize);
+                          runTestQuery(testRunPage + 1);
                         }
                       }}
                       disabled={testRunPage >= testRunResult.totalPages - 1}
@@ -1096,144 +1006,6 @@ function QueryManagementPage() {
         )}
       </div>
 
-      <div className="card">
-        <h2 className="card-title">Saved Queries</h2>
-
-        <div
-          style={{
-            display: "flex",
-            gap: "16px",
-            alignItems: "flex-end",
-            flexWrap: "wrap",
-            marginBottom: "8px",
-          }}
-        >
-          <div
-            className="search-wrapper"
-            style={{ flex: 1, minWidth: "220px", marginBottom: 0 }}
-          >
-            <span className="search-icon">?</span>
-            <input
-              type="text"
-              placeholder="Search by name or description..."
-              autoComplete="off"
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-            />
-          </div>
-
-          <div className="form-group" style={{ margin: 0, minWidth: "200px" }}>
-            <label htmlFor="filterDbType">Filter by DB Type</label>
-            <select
-              id="filterDbType"
-              value={filterDbType}
-              onChange={(event) => setFilterDbType(event.target.value)}
-            >
-              <option value="">-- All Types --</option>
-              {dbTypes.map((type) => (
-                <option key={`filter-${type}`} value={type}>
-                  {type}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className="search-count">
-          {filteredQueries.length === allQueries.length
-            ? `${allQueries.length} queries total`
-            : `Showing ${filteredQueries.length} of ${allQueries.length} queries`}
-        </div>
-
-        {tableAlert && (
-          <div className={`alert ${tableAlert.type} show`}>{tableAlert.message}</div>
-        )}
-
-        {tableLoading && <div className="spinner show">Loading queries...</div>}
-
-        {!tableLoading && filteredQueries.length > 0 && (
-          <div className="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Name</th>
-                  <th>Description</th>
-                  <th>Connection</th>
-                  <th>DB Type</th>
-                  <th>Query Preview</th>
-                  <th>Created At</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredQueries.map((query, index) => {
-                  const createdAt = query.createdAt
-                    ? new Date(query.createdAt).toLocaleString()
-                    : "—";
-                  const preview =
-                    query.queryText.length > 60
-                      ? `${query.queryText.slice(0, 60)}...`
-                      : query.queryText;
-
-                  return (
-                    <tr key={query.queryId}>
-                      <td>{index + 1}</td>
-                      <td>
-                        <strong>{highlightMatch(query.name, searchTerm)}</strong>
-                      </td>
-                      <td>
-                        {query.description ? (
-                          highlightMatch(query.description, searchTerm)
-                        ) : (
-                          <span style={{ color: "#999" }}>—</span>
-                        )}
-                      </td>
-                      <td>
-                        <span>{configNameById.get(String(query.configId)) || `#${query.configId}`}</span>
-                      </td>
-                      <td>
-                        <span className="badge badge-info">{query.dbType}</span>
-                      </td>
-                      <td>
-                        <code
-                          style={{
-                            background: "#f0f2f5",
-                            padding: "3px 8px",
-                            borderRadius: "4px",
-                            fontSize: "12px",
-                            color: "#1e3a5f",
-                          }}
-                        >
-                          {preview}
-                        </code>
-                      </td>
-                      <td>{createdAt}</td>
-                      <td>
-                        <button
-                          className="btn btn-danger"
-                          style={{ padding: "6px 14px", fontSize: "12px" }}
-                          onClick={() => handleDeleteQuery(query.queryId, query.name)}
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {!tableLoading && filteredQueries.length === 0 && (
-          <div className="empty-state">
-            {searchTerm.trim()
-              ? `No queries match "${searchTerm.trim()}".`
-              : "No queries saved yet. Add one above."}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

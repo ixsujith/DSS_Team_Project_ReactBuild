@@ -247,3 +247,13 @@
   border: 1px solid #c3e6cb;
   border-radius: 6px;
 }
+
+.query-management-page .form-row-three {
+  grid-template-columns: 1.3fr 1fr 1fr;
+}
+
+@media (max-width: 960px) {
+  .query-management-page .form-row-three {
+    grid-template-columns: 1fr;
+  }
+}

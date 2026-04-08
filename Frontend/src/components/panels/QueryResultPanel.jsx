@@ -32,6 +32,7 @@ function QueryResultPanel({
   executionAlert,
   executionLoading,
   executionResult,
+  emptyStateMessage,
   currentPage,
   pageSize,
   onPageChange,
@@ -56,7 +57,7 @@ function QueryResultPanel({
       )}
 
       {!selectedQuery && !executionLoading && !executionResult && (
-        <div className="empty-state">Search and run a saved query from the left sidebar.</div>
+        <div className="empty-state">{emptyStateMessage}</div>
       )}
 
       {selectedQuery && (

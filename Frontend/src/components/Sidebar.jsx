@@ -34,19 +34,14 @@ function Sidebar({
             placeholder="Search saved queries..."
             value={searchTerm}
             onChange={(event) => onSearchTermChange(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                onRunQuery();
-              }
-            }}
           />
           <button
             type="button"
             className="btn btn-primary workspace-run-button"
-            onClick={() => onRunQuery()}
-            disabled={queriesLoading || filteredQueries.length === 0}
+            onClick={() => onSearchTermChange("")}
+            disabled={searchTerm.length === 0}
           >
-            Run
+            Clear
           </button>
         </div>
 

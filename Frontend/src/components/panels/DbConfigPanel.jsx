@@ -29,7 +29,7 @@ function validateForm(data) {
   return null;
 }
 
-function DbConfigPanel() {
+function DbConfigPanel({ onConfigsChanged }) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [form, setForm] = useState(initialFormState);
   const [configs, setConfigs] = useState([]);
@@ -72,6 +72,11 @@ function DbConfigPanel() {
   useEffect(() => {
     loadConfigs();
   }, [loadConfigs]);
+
+  const refreshExecutionPreconditions = useCallback(async () => {
+    if (!onConfigsChanged) return;
+    await onConfigsChanged();
+  }, [onConfigsChanged]);
 
   const handleFieldChange = (field) => (event) => {
     setForm((previous) => ({ ...previous, [field]: event.target.value }));
@@ -166,6 +171,7 @@ function DbConfigPanel() {
         resetForm();
         setShowAddForm(false);
         await loadConfigs();
+        await refreshExecutionPreconditions();
         return;
       }
 
@@ -195,6 +201,7 @@ function DbConfigPanel() {
           type: "alert-success",
         });
         await loadConfigs();
+        await refreshExecutionPreconditions();
         return;
       }
 
